@@ -12,7 +12,65 @@
 
 #define MESG_SIZE 80
 #define SA struct sockaddr  // ==> (SA*)&servaddr
-// #define STD_PORT 4567
+
+#define MAX_CLIENTS 5
+#define MAX_MSG_SIZE 128
+
+typedef struct {
+  int clientID;             // ID von der verschicken soll
+  char mesg[MAX_MSG_SIZE];  // Nachricht die verschickt werden
+} MessageForClient;
+
+typedef struct {
+  int ID;
+  MessageForClient* mfc;
+  int connfd;
+} ThreadData;
+
+MessageForClient Message;        // Globale Nachricht zum austausch für alle
+pthread_t clients[MAX_CLIENTS];  // Alle Thread/Clients
+pthread_mutex_t mut;
+
+// preparing message for sending to client
+int setMessageForClient(int _id, char* _str) {
+  if (_id >= MAX_CLIENTS) {
+    fprintf(stderr, "Error: no such client\n");
+    return -1;
+  }
+  pthread_mutex_lock(&mut);
+  if (Message.clientID != -1) {
+    pthread_mutex_unlock(&mut);
+    return 0;
+  }
+  Message.clientID = _id;
+  strncpy(Message.mesg, _str, MAX_MSG_SIZE);
+  pthread_mutex_unlock(&mut);
+  return 1;
+}
+
+// accessing the client thread and printing out the message
+void* ThreadFunc(void* _data) {
+  ThreadData data = *((ThreadData*)_data);
+  // id from client
+  int myID = data.ID;
+  MessageForClient* mfc = data.mfc;
+  char buffer[MAX_MSG_SIZE];
+
+  while (1) {
+    pthread_mutex_lock(&mut);
+    if (mfc->clientID == myID) {
+      strncpy(buffer, mfc->mesg, MAX_MSG_SIZE);
+      // printf("%d: got message: %s\n", myID, buffer);
+      mfc->clientID = -1;
+      pthread_mutex_unlock(&mut);
+      if (strncmp(buffer, "quit", 4) == 0) break;
+    } else {
+      pthread_mutex_unlock(&mut);
+      usleep(100);
+    }
+  }
+  return NULL;
+}
 
 int connectionCount = 0;
 int sockfds[50];
@@ -168,7 +226,11 @@ void* serverFunction(void* arg) {
 }
 
 void readAndSendMessage(int clientNumber) {
-  char buffer[MESG_SIZE];
+  // reading message from destination and message from commandline
+  char buffer[MAX_MSG_SIZE];
+  int target = clientNumber;
+  Message.clientID = -1;
+  // char buffer[MESG_SIZE];
   int n;
 
   // clear buffer
@@ -177,6 +239,23 @@ void readAndSendMessage(int clientNumber) {
   n = 0;
   while ((buffer[n++] = getchar()) != '\n')
     ;
+
+  // while (Message.clientID != -1) {
+  //   usleep(100);
+  // }
+  // // reading inputs
+  // printf("Ziel: ");
+  // scanf("%d", &target);
+  // printf("Nachricht: ");
+  // scanf("%s", buffer);
+
+  while (Message.clientID != -1) {
+    usleep(100);
+  }
+
+  // Sleep when sending message to client
+  while (!setMessageForClient(target, buffer)) usleep(100);
+
   // write(sockfd, buffer, sizeof(buffer));
   // bzero(buffer, sizeof(buffer));
 
@@ -184,7 +263,7 @@ void readAndSendMessage(int clientNumber) {
   // printf("From Server : %s", buffer);
 }
 
-void inputMethod() {
+void waitForInput() {
   char buffer[MESG_SIZE];
   int n;
 
@@ -207,6 +286,8 @@ void inputMethod() {
     if ((strncmp(buffer, "1", 1)) == 0) {
       printf("Your input: 1\n");
       readAndSendMessage(1);
+      // sleep(100);
+      // continue;
       break;
     }
 
@@ -250,7 +331,41 @@ int main(int argc, char** argv) {
   signal(SIGPIPE, SIG_IGN);  // Stopping Server crash after ctrl + c
   setbuf(stdout, 0);         // ==> deleting standard out puffer
 
-  inputMethod();
+  //
+
+  ThreadData td[MAX_CLIENTS];
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    td[i].ID = i;
+    td[i].mfc = &Message;
+  }
+  pthread_mutex_init(&mut, NULL);
+
+  // initialising Client Threads
+  for (int i = 0; i < 5; i++) {
+    pthread_create(&clients[i], NULL, ThreadFunc, &(td[i]));
+  }
+
+  while (1) {
+    waitForInput();
+  }
+
+  // // reading message from destination and message from commandline
+  // char buffer[MAX_MSG_SIZE];
+  // int target;
+  // Message.clientID = -1;
+  // while (1) {
+  //   while (Message.clientID != -1) {
+  //     usleep(100);
+  //   }
+  //   // reading inputs
+  //   printf("Ziel: ");
+  //   scanf("%d", &target);
+  //   printf("Nachricht: ");
+  //   scanf("%s", buffer);
+
+  //   // Sleep when sending message to client
+  //   while (!setMessageForClient(target, buffer)) usleep(100);
+  // }
 
   // char tmp = argv[1];
 

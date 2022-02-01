@@ -16,13 +16,33 @@
 #define SA struct sockaddr  // ==> (SA*)&servaddr
 
 #define MAX_CLIENTS 5
-#define MAX_MSG_SIZE 128
+#define MAX_MSG_SIZE 80
 
 // +++++++++++++++++++ Server Logic +++++++++++++++++++
+
 int connectionCount = 0;
 int sockfds[50];
 
 int establishedConnections = 0;
+
+struct MessageForClient {
+  int clientID;             // ID von der verschicken soll
+  char mesg[MAX_MSG_SIZE];  // Nachricht die verschickt werden
+};
+
+struct ThreadData {
+  int ID;
+  struct MessageForClient* mfc;
+  int connfd;
+  int address;
+};
+
+struct MessageForClient Message;  // Globale Nachricht zum austausch für alle
+pthread_t clients[MAX_CLIENTS];   // Alle Thread/Clients
+pthread_mutex_t messageMut;
+pthread_mutex_t threadDataMut;
+
+struct ThreadData threadInfo[MAX_CLIENTS];
 
 // socket initialisation
 int createFeed(int _port) {
@@ -156,6 +176,7 @@ void* serverFunction(void* arg) {
     // read the message from client and copy it in buffer
     read(sockfd, buffer, sizeof(buffer));
     // exchange upper-case letters by lower-case letter and vice versa.
+    printf("Server got message %s\n", buffer);
     changeCase(buffer);
 
     // and send that buffer to client
@@ -304,66 +325,7 @@ int firstTouchClient(char* _serverAddress, int _port) {
   return _port;
 }
 
-void clientFunction(int sockfd) {
-  char buffer[MESG_SIZE];
-  int n;
-  while (1) {
-    // // clear buffer
-    // bzero(buffer, sizeof(buffer));
-    // printf("Enter string: ");
-    // n = 0;
-    // while ((buffer[n++] = getchar()) != '\n')
-    //   ;
-    // write(sockfd, buffer, sizeof(buffer));
-    // bzero(buffer, sizeof(buffer));
-
-    // read(sockfd, buffer, sizeof(buffer));
-    // printf("From Server : %s", buffer);
-
-    // if ((strncmp(buffer, "QUIT", 4)) == 0) {
-    //   printf("Client exit.\n");
-    //   break;
-    // }
-  }
-}
-
-void permanentConnectionClient(char* _serverAddress, int _port) {
-  int sockfd = setupConnectionClient(_serverAddress, _port);
-  int retries = 5;
-  printf("Permanent port: %d\n", _port);
-  while (sockfd < 0 && retries > 0) {
-    sleep(1);
-    sockfd = setupConnectionClient(_serverAddress, _port);
-    retries--;
-  }
-  if (retries == 0 && sockfd < 0) {
-    fprintf(stderr, "Error: Cannot reconnect server on port %d --- exit\n",
-            _port);
-    exit(-1 * sockfd);
-  }
-
-  // clientFunction(sockfd, );
-  close(sockfd);
-}
-
 // +++++++++++++++++++ ClientServer Logic +++++++++++++++++++
-
-typedef struct {
-  int clientID;             // ID von der verschicken soll
-  char mesg[MAX_MSG_SIZE];  // Nachricht die verschickt werden
-} MessageForClient;
-
-typedef struct {
-  int ID;
-  MessageForClient* mfc;
-  int connfd;
-  int address;
-
-} ThreadData;
-
-MessageForClient Message;        // Globale Nachricht zum austausch für alle
-pthread_t clients[MAX_CLIENTS];  // Alle Thread/Clients
-pthread_mutex_t mut;
 
 // preparing message for sending to client
 int setMessageForClient(int _id, char* _str) {
@@ -371,35 +333,50 @@ int setMessageForClient(int _id, char* _str) {
     fprintf(stderr, "Error: no such client\n");
     return -1;
   }
-  pthread_mutex_lock(&mut);
+  pthread_mutex_lock(&messageMut);
   if (Message.clientID != -1) {
-    pthread_mutex_unlock(&mut);
+    pthread_mutex_unlock(&messageMut);
     return 0;
   }
   Message.clientID = _id;
   strncpy(Message.mesg, _str, MAX_MSG_SIZE);
-  pthread_mutex_unlock(&mut);
+  pthread_mutex_unlock(&messageMut);
   return 1;
 }
 
 // accessing the client thread and printing out the message
 void* ThreadFunc(void* _data) {
-  ThreadData data = *((ThreadData*)_data);
+  struct ThreadData* data = (struct ThreadData*)_data;
+  pthread_mutex_lock(&threadDataMut);
   // id from client
-  int myID = data.ID;
-  MessageForClient* mfc = data.mfc;
+  int myID = data->ID;
+  struct MessageForClient* mfc = data->mfc;
+  pthread_mutex_unlock(&threadDataMut);
   char buffer[MAX_MSG_SIZE];
 
   while (1) {
-    pthread_mutex_lock(&mut);
+    pthread_mutex_lock(&messageMut);
     if (mfc->clientID == myID) {
       strncpy(buffer, mfc->mesg, MAX_MSG_SIZE);
-      // printf("%d: got message: %s\n", myID, buffer);
+      printf("Used client id %d\n", data->connfd);
+      if (write(data->connfd, buffer, sizeof(buffer)) == -1) {
+        printf("write error \n ");
+      }
+
+      printf("%d: sent message: %s\n", myID, buffer);
+      char response[MAX_MSG_SIZE];
+      bzero(response, sizeof(response));
+      if (read(data->connfd, response, sizeof(response)) == -1) {
+        printf("error\n");
+      }
+
+      printf("%d: got message: %s\n", myID, response);
       mfc->clientID = -1;
-      pthread_mutex_unlock(&mut);
+      pthread_mutex_unlock(&messageMut);
       if (strncmp(buffer, "quit", 4) == 0) break;
+      bzero(buffer, sizeof(buffer));
     } else {
-      pthread_mutex_unlock(&mut);
+      pthread_mutex_unlock(&messageMut);
       usleep(100);
     }
   }
@@ -407,12 +384,32 @@ void* ThreadFunc(void* _data) {
 }
 
 void readAndSendMessage(int clientNumber) {
+  pthread_mutex_lock(&threadDataMut);
+  printf("ClientId: %d\n", clientNumber);
+  if (threadInfo[clientNumber].connfd == -1) {
+    printf("Verbindung %d existiert nocht nicht bitte mit C erstellen\n",
+           clientNumber + 1);
+    pthread_mutex_unlock(&threadDataMut);
+    return;
+  }
+  pthread_mutex_unlock(&threadDataMut);
+
   // reading message from destination and message from commandline
   char buffer[MAX_MSG_SIZE];
   int target = clientNumber;
   Message.clientID = -1;
   // char buffer[MESG_SIZE];
   int n;
+
+  while (1) {
+    pthread_mutex_lock(&messageMut);
+    if (Message.clientID == -1) {
+      pthread_mutex_unlock(&messageMut);
+      break;
+    }
+    pthread_mutex_unlock(&messageMut);
+    usleep(100);
+  }
 
   // clear buffer
   bzero(buffer, sizeof(buffer));
@@ -430,13 +427,10 @@ void readAndSendMessage(int clientNumber) {
   // printf("Nachricht: ");
   // scanf("%s", buffer);
 
-  while (Message.clientID != -1) {
-    usleep(100);
-  }
-
   // Sleep when sending message to client
   while (!setMessageForClient(target, buffer)) usleep(100);
-  printf("%s", Message.mesg);
+  pthread_mutex_lock(&messageMut);
+  pthread_mutex_unlock(&messageMut);
 
   // write(sockfd, buffer, sizeof(buffer));
   // bzero(buffer, sizeof(buffer));
@@ -446,39 +440,61 @@ void readAndSendMessage(int clientNumber) {
 }
 
 void establishConnection() {
-  while (1) {
-    int port;
-    char buffer1[MESG_SIZE];
-    int n1;
-
-    // clear buffer
-    bzero(buffer1, sizeof(buffer1));
-    printf("Enter IP Address: ");
-    n1 = 0;
-    while ((buffer1[n1++] = getchar()) != '\n')
-      ;
-
-    char buffer2[MESG_SIZE];
-    int n2;
-
-    // clear buffer
-    bzero(buffer2, sizeof(buffer2));
-    printf("Enter Port: ");
-    n2 = 0;
-    while ((buffer2[n2++] = getchar()) != '\n')
-      ;
-
-    printf("IP Address: %s", buffer1);
-    printf("Port: %s", buffer2);
-
-    port = firstTouchClient(buffer1, atoi(buffer2));
-
-    permanentConnectionClient(buffer1, port);
-
-    establishedConnections++;
-
-    break;
+  pthread_mutex_unlock(&threadDataMut);
+  int connectionId = -1;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (threadInfo[i].connfd == -1) {
+      connectionId = i;
+      break;
+    }
   }
+  if (connectionId == -1) {
+    printf("Bereits %d Verbindungen Aufgebaut, keine übrig\n", MAX_CLIENTS);
+    pthread_mutex_unlock(&threadDataMut);
+    return;
+  }
+  threadInfo[connectionId].ID = connectionId;
+
+  char serverAddress[MESG_SIZE];
+  int n1;
+
+  // clear buffer
+  bzero(serverAddress, sizeof(serverAddress));
+  printf("Enter IP Address: ");
+  n1 = 0;
+  while ((serverAddress[n1++] = getchar()) != '\n')
+    ;
+
+  char portString[MESG_SIZE];
+  int n2;
+
+  // clear buffer
+  bzero(portString, sizeof(portString));
+  printf("Enter Port: ");
+  n2 = 0;
+  while ((portString[n2++] = getchar()) != '\n')
+    ;
+
+  printf("IP Address: %s", serverAddress);
+  printf("Port: %s", portString);
+
+  int connectionPort = atoi(portString);
+  int permanentPort = firstTouchClient(serverAddress, connectionPort);
+  int retries = 5;
+
+  while (threadInfo[connectionId].connfd < 0 && retries > 0) {
+    sleep(1);
+    threadInfo[connectionId].connfd =
+        setupConnectionClient(serverAddress, permanentPort);
+    retries--;
+  }
+  if (retries == 0 && threadInfo[connectionId].connfd < 0) {
+    fprintf(stderr, "Error: Cannot reconnect server on port %s --- exit\n",
+            portString);
+    pthread_mutex_unlock(&threadDataMut);
+    exit(-1 * threadInfo[connectionId].connfd);
+  }
+  pthread_mutex_unlock(&threadDataMut);
 }
 
 void stopConnection() {
@@ -523,35 +539,6 @@ void waitForInput() {
     // read(sockfd, buffer, sizeof(buffer));
     // printf("From Server : %s", buffer);
 
-    if ((strncmp(buffer, "1", 1)) == 0) {
-      printf("Your input: 1\n");
-      readAndSendMessage(1);
-      // sleep(100);
-      // continue;
-      break;
-    }
-
-    if ((strncmp(buffer, "2", 1)) == 0) {
-      printf("Your input: 2\n");
-      readAndSendMessage(2);
-      break;
-    }
-    if ((strncmp(buffer, "3", 1)) == 0) {
-      printf("Your input: 3\n");
-      readAndSendMessage(3);
-      break;
-    }
-    if ((strncmp(buffer, "4", 1)) == 0) {
-      printf("Your input: 4\n");
-      readAndSendMessage(4);
-      break;
-    }
-    if ((strncmp(buffer, "5", 1)) == 0) {
-      printf("Your input: 5\n");
-      readAndSendMessage(5);
-      break;
-    }
-
     if ((strncmp(buffer, "C", 1)) == 0) {
       printf("Your input: C\n");
       establishConnection();
@@ -567,6 +554,12 @@ void waitForInput() {
       quit();
       break;
     }
+
+    int command = buffer[0] - '0';
+    if (0 <= command && command <= MAX_CLIENTS) {
+      printf("Your input: %d\n", command);
+      readAndSendMessage(0);
+    }
   }
 }
 
@@ -580,16 +573,22 @@ int main(int argc, char** argv) {
 
   // pthread_join(server, NULL);
 
-  ThreadData td[MAX_CLIENTS];
+  pthread_mutex_init(&threadDataMut, NULL);
+  pthread_mutex_lock(&threadDataMut);
+  Message.clientID = -1;
   for (int i = 0; i < MAX_CLIENTS; i++) {
-    td[i].ID = i;
-    td[i].mfc = &Message;
+    threadInfo[i].ID = i;
+    threadInfo[i].mfc = &Message;
+    threadInfo[i].connfd = -1;
   }
-  pthread_mutex_init(&mut, NULL);
+  pthread_mutex_unlock(&threadDataMut);
+  pthread_mutex_init(&messageMut, NULL);
 
   // initialising Client Threads
   for (int i = 0; i < 5; i++) {
-    pthread_create(&clients[i], NULL, ThreadFunc, &(td[i]));
+    struct ThreadData* clientArgument = malloc(sizeof(*clientArgument));
+    clientArgument = &threadInfo[i];
+    pthread_create(&clients[i], NULL, ThreadFunc, clientArgument);
   }
 
   while (1) {

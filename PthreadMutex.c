@@ -19,7 +19,7 @@ typedef struct {
 
 MessageForClient Message;        // Globale Nachricht zum austausch für alle
 pthread_t clients[MAX_CLIENTS];  // Alle Thread/Clients
-pthread_mutex_t mut;
+pthread_mutex_t messageMut;
 
 // preparing message for sending to client
 int setMessageForClient(int _id, char* _str) {
@@ -27,14 +27,14 @@ int setMessageForClient(int _id, char* _str) {
     fprintf(stderr, "Error: no such client\n");
     return -1;
   }
-  pthread_mutex_lock(&mut);
+  pthread_mutex_lock(&messageMut);
   if (Message.clientID != -1) {
-    pthread_mutex_unlock(&mut);
+    pthread_mutex_unlock(&messageMut);
     return 0;
   }
   Message.clientID = _id;
   strncpy(Message.mesg, _str, MAX_MSG_SIZE);
-  pthread_mutex_unlock(&mut);
+  pthread_mutex_unlock(&messageMut);
   return 1;
 }
 
@@ -47,15 +47,15 @@ void* ThreadFunc(void* _data) {
   char buffer[MAX_MSG_SIZE];
 
   while (1) {
-    pthread_mutex_lock(&mut);
+    pthread_mutex_lock(&messageMut);
     if (mfc->clientID == myID) {
       strncpy(buffer, mfc->mesg, MAX_MSG_SIZE);
       printf("%d: got message: %s\n", myID, buffer);
       mfc->clientID = -1;
-      pthread_mutex_unlock(&mut);
+      pthread_mutex_unlock(&messageMut);
       if (strncmp(buffer, "quit", 4) == 0) break;
     } else {
-      pthread_mutex_unlock(&mut);
+      pthread_mutex_unlock(&messageMut);
       usleep(100);
     }
   }
@@ -68,7 +68,7 @@ int main() {
     td[i].ID = i;
     td[i].mfc = &Message;
   }
-  pthread_mutex_init(&mut, NULL);
+  pthread_mutex_init(&messageMut, NULL);
 
   // initialising Client Threads
   for (int i = 0; i < 5; i++) {

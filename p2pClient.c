@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+// For Client Connect
+#include <arpa/inet.h>
 
 #define MESG_SIZE 80
 #define SA struct sockaddr  // ==> (SA*)&servaddr
@@ -16,62 +18,7 @@
 #define MAX_CLIENTS 5
 #define MAX_MSG_SIZE 128
 
-typedef struct {
-  int clientID;             // ID von der verschicken soll
-  char mesg[MAX_MSG_SIZE];  // Nachricht die verschickt werden
-} MessageForClient;
-
-typedef struct {
-  int ID;
-  MessageForClient* mfc;
-  int connfd;
-} ThreadData;
-
-MessageForClient Message;        // Globale Nachricht zum austausch für alle
-pthread_t clients[MAX_CLIENTS];  // Alle Thread/Clients
-pthread_mutex_t mut;
-
-// preparing message for sending to client
-int setMessageForClient(int _id, char* _str) {
-  if (_id >= MAX_CLIENTS) {
-    fprintf(stderr, "Error: no such client\n");
-    return -1;
-  }
-  pthread_mutex_lock(&mut);
-  if (Message.clientID != -1) {
-    pthread_mutex_unlock(&mut);
-    return 0;
-  }
-  Message.clientID = _id;
-  strncpy(Message.mesg, _str, MAX_MSG_SIZE);
-  pthread_mutex_unlock(&mut);
-  return 1;
-}
-
-// accessing the client thread and printing out the message
-void* ThreadFunc(void* _data) {
-  ThreadData data = *((ThreadData*)_data);
-  // id from client
-  int myID = data.ID;
-  MessageForClient* mfc = data.mfc;
-  char buffer[MAX_MSG_SIZE];
-
-  while (1) {
-    pthread_mutex_lock(&mut);
-    if (mfc->clientID == myID) {
-      strncpy(buffer, mfc->mesg, MAX_MSG_SIZE);
-      // printf("%d: got message: %s\n", myID, buffer);
-      mfc->clientID = -1;
-      pthread_mutex_unlock(&mut);
-      if (strncmp(buffer, "quit", 4) == 0) break;
-    } else {
-      pthread_mutex_unlock(&mut);
-      usleep(100);
-    }
-  }
-  return NULL;
-}
-
+// +++++++++++++++++++ Server Logic +++++++++++++++++++
 int connectionCount = 0;
 int sockfds[50];
 
@@ -117,7 +64,7 @@ int createFeed(int _port) {
 
 // Socket listen and connection
 int setupConnection(int sockfd) {
-  printf("Verbindung aufbauen\n");
+  // printf("Verbindung aufbauen\n");
   int len;
   struct sockaddr_in servaddr, client;
 
@@ -159,7 +106,7 @@ int firstTouch(int sockfd, int _port) {
   printf("received: %s\n", buffer);
 
   ((int*)buffer)[0] = _port + 1;
-  fprintf(stderr, "sending Port %d\n", _port + 1);
+  // fprintf(stderr, "sending Port %d\n", _port + 1);
   write(sockfd, buffer, MESG_SIZE);
 
   // closing socket for this client ==> going further in main function
@@ -198,7 +145,7 @@ void* serverFunction(void* arg) {
   // printf("server sockfd: %d\n", sockfd);
   char buffer[MESG_SIZE];
 
-  printf("Thread started for new client!\n");
+  // printf("Thread started for new client!\n");
 
   // infinite loop for chat
   while (1) {
@@ -221,6 +168,201 @@ void* serverFunction(void* arg) {
     }
   }
   // return 0;
+}
+
+void* runServer() {
+  int port = 4567;
+  int stdPort = 4567;
+
+  // if (argc > 2) {
+  //   fprintf(stderr, "usage: %s [port] --- exit\n", argv[0]);
+  //   return 1;
+  // }
+  // if (argc == 2) {
+  //   char* tmp = argv[1];
+  //   while (tmp[0] != 0) {
+  //     if (!isdigit((int)tmp[0])) {
+  //       fprintf(stderr, "Error: %s is no valid port --- exit\n", argv[1]);
+  //       return 2;
+  //     }
+  //     tmp++;
+  //   }
+  //   port = atoi(argv[1]);
+  // }
+
+  // 50 clients
+
+  pthread_t thread;
+
+  int sockfd = createFeed(stdPort);  // for first touch ==> creating socket
+  // fprintf(stderr, "Port: %d\n", port);
+
+  while (1) {
+    while (connectionCount > 50) {
+      usleep(100);
+    }
+
+    // for (int i = 0; i < 50; i++) {
+    //   printf("array[%d] = %d\n\n", i + 1, sockfds[i]);
+    // }
+    // printf("connectionCount: %d\n", connectionCount);
+
+    int connfd, len;
+    struct sockaddr_in client;
+
+    // fprintf(stderr, "sockfd: %d\n", sockfd);
+
+    connfd = setupConnection(sockfd);
+
+    if (connfd < 0) {
+      fprintf(stderr, "Error: Server accept failed --- exit\n");
+      exit(6);
+    } else {
+      // printf("Server accept client.\n");
+    }
+
+    port = firstTouch(connfd, port);  // ==> now got to firstTouch
+
+    // fprintf(stderr, "PORT: %d\n", port);
+    // fprintf(stderr, "CONNFD: %d\n", connfd);
+
+    int permanentSockfd = createFeed(port);
+
+    int nextFreeIndex = 0;
+
+    for (int i = 0; i < 50; i++) {
+      if (sockfds[i] == 0) {
+        nextFreeIndex = i;
+        break;
+      }
+    }
+
+    sockfds[nextFreeIndex] = setupConnection(permanentSockfd);
+    int* arg = malloc(sizeof(*arg));
+    if (arg == NULL) {
+      exit(EXIT_FAILURE);
+    }
+    *arg = sockfds[nextFreeIndex];
+    pthread_create(&thread, NULL, serverFunction, arg);
+  }
+
+  pthread_join(thread, NULL);
+
+  // Closing all sockets when server ist not used anymore
+  // for (int i = connectionCount; i > 0; i--) {
+  //   printf("closing socket: %i\n", sockfds[i]);
+  //   close(sockfds[i]);
+  // }
+}
+
+// +++++++++++++++++++  Logic Client +++++++++++++++++++
+int setupConnectionClient(char* _serverAddress, int _port) {
+  int sockfd;
+  struct sockaddr_in servaddr;
+
+  // Create socket
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd == -1) {
+    fprintf(stderr, "Error: Cannot create socket --- exit\n");
+    return -3;
+  } else {
+    printf("Socket successfully created..\n");
+  }
+  bzero(&servaddr, sizeof(servaddr));
+
+  // Set up socket
+  servaddr.sin_family = AF_INET;
+  servaddr.sin_addr.s_addr = inet_addr(_serverAddress);
+  servaddr.sin_port = htons(_port);
+
+  // Connect to server
+  if (connect(sockfd, (SA*)&servaddr, sizeof(servaddr)) != 0) {
+    fprintf(stderr, "Error: Cannot connect server on port %d --- exit\n",
+            _port);
+    return -4;
+  } else {
+    printf("connected to the server..\n");
+  }
+
+  return sockfd;
+}
+
+void permanentConnectionClient(char* _serverAddress, int _port) {
+  int sockfd = setupConnectionClient(_serverAddress, _port);
+  int retries = 5;
+  printf("Permanent port: %d\n", _port);
+  while (sockfd < 0 && retries > 0) {
+    sleep(1);
+    sockfd = setupConnectionClient(_serverAddress, _port);
+    retries--;
+  }
+  if (retries == 0 && sockfd < 0) {
+    fprintf(stderr, "Error: Cannot reconnect server on port %d --- exit\n",
+            _port);
+    exit(-1 * sockfd);
+  }
+  // clientFunction(sockfd);
+  close(sockfd);
+}
+
+// +++++++++++++++++++ ClientServer Logic +++++++++++++++++++
+
+typedef struct {
+  int clientID;             // ID von der verschicken soll
+  char mesg[MAX_MSG_SIZE];  // Nachricht die verschickt werden
+} MessageForClient;
+
+typedef struct {
+  int ID;
+  MessageForClient* mfc;
+  int connfd;
+  int address;
+
+} ThreadData;
+
+MessageForClient Message;        // Globale Nachricht zum austausch für alle
+pthread_t clients[MAX_CLIENTS];  // Alle Thread/Clients
+pthread_mutex_t mut;
+
+// preparing message for sending to client
+int setMessageForClient(int _id, char* _str) {
+  if (_id >= MAX_CLIENTS) {
+    fprintf(stderr, "Error: no such client\n");
+    return -1;
+  }
+  pthread_mutex_lock(&mut);
+  if (Message.clientID != -1) {
+    pthread_mutex_unlock(&mut);
+    return 0;
+  }
+  Message.clientID = _id;
+  strncpy(Message.mesg, _str, MAX_MSG_SIZE);
+  pthread_mutex_unlock(&mut);
+  return 1;
+}
+
+// accessing the client thread and printing out the message
+void* ThreadFunc(void* _data) {
+  ThreadData data = *((ThreadData*)_data);
+  // id from client
+  int myID = data.ID;
+  MessageForClient* mfc = data.mfc;
+  char buffer[MAX_MSG_SIZE];
+
+  while (1) {
+    pthread_mutex_lock(&mut);
+    if (mfc->clientID == myID) {
+      strncpy(buffer, mfc->mesg, MAX_MSG_SIZE);
+      // printf("%d: got message: %s\n", myID, buffer);
+      mfc->clientID = -1;
+      pthread_mutex_unlock(&mut);
+      if (strncmp(buffer, "quit", 4) == 0) break;
+    } else {
+      pthread_mutex_unlock(&mut);
+      usleep(100);
+    }
+  }
+  return NULL;
 }
 
 void readAndSendMessage(int clientNumber) {
@@ -287,6 +429,8 @@ void stopConnection() {
     ;
 
   printf("Stop connection: Client %s", buffer);
+
+  // socket
 }
 
 void quit() {
@@ -399,6 +543,11 @@ int main(int argc, char** argv) {
   // }
 
   // sockfds[nextFreeIndex] = setupConnection(permanentSockfd);
+
+  pthread_t server;
+  pthread_create(&server, NULL, &runServer, NULL);
+
+  // pthread_join(server, NULL);
 
   ThreadData td[MAX_CLIENTS];
   for (int i = 0; i < MAX_CLIENTS; i++) {

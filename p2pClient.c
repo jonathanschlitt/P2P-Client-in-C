@@ -75,8 +75,6 @@ void* ThreadFunc(void* _data) {
 int connectionCount = 0;
 int sockfds[50];
 
-int clientThreads[5];
-
 // socket initialisation
 int createFeed(int _port) {
   int sockfd;
@@ -263,6 +261,40 @@ void readAndSendMessage(int clientNumber) {
   // printf("From Server : %s", buffer);
 }
 
+void establishConnection() {
+  char buffer[MESG_SIZE];
+  int n;
+
+  // clear buffer
+  bzero(buffer, sizeof(buffer));
+  printf("Enter IP Address: ");
+  n = 0;
+  while ((buffer[n++] = getchar()) != '\n')
+    ;
+
+  printf("IP Address: %s", buffer);
+}
+
+void stopConnection() {
+  char buffer[MESG_SIZE];
+  int n;
+
+  // clear buffer
+  bzero(buffer, sizeof(buffer));
+  printf("Client Number: ");
+  n = 0;
+  while ((buffer[n++] = getchar()) != '\n')
+    ;
+
+  printf("Stop connection: Client %s", buffer);
+}
+
+void quit() {
+  printf("Stopping server... \n");
+  // sleep(100);
+  exit(0);
+}
+
 void waitForInput() {
   char buffer[MESG_SIZE];
   int n;
@@ -314,14 +346,17 @@ void waitForInput() {
 
     if ((strncmp(buffer, "C", 1)) == 0) {
       printf("Your input: C\n");
+      establishConnection();
       break;
     }
     if ((strncmp(buffer, "D", 1)) == 0) {
       printf("Your input: D\n");
+      stopConnection();
       break;
     }
     if ((strncmp(buffer, "Q", 1)) == 0) {
       printf("Your input: Q\n");
+      quit();
       break;
     }
   }
@@ -331,7 +366,39 @@ int main(int argc, char** argv) {
   signal(SIGPIPE, SIG_IGN);  // Stopping Server crash after ctrl + c
   setbuf(stdout, 0);         // ==> deleting standard out puffer
 
-  //
+  // int port = 4567;
+  // int stdPort = 4567;
+
+  // int sockfd = createFeed(stdPort);
+
+  // int connfd, len;
+  // struct sockaddr_in client;
+
+  // // fprintf(stderr, "sockfd: %d\n", sockfd);
+
+  // connfd = setupConnection(sockfd);
+
+  // if (connfd < 0) {
+  //   fprintf(stderr, "Error: Server accept failed --- exit\n");
+  //   exit(6);
+  // } else {
+  //   printf("Server accept client.\n");
+  // }
+
+  // port = firstTouch(connfd, port);
+
+  // int permanentSockfd = createFeed(port);
+
+  // int nextFreeIndex = 0;
+
+  // for (int i = 0; i < 50; i++) {
+  //   if (sockfds[i] == 0) {
+  //     nextFreeIndex = i;
+  //     break;
+  //   }
+  // }
+
+  // sockfds[nextFreeIndex] = setupConnection(permanentSockfd);
 
   ThreadData td[MAX_CLIENTS];
   for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -368,9 +435,6 @@ int main(int argc, char** argv) {
   // }
 
   // char tmp = argv[1];
-
-  // int port = 4567;
-  // int stdPort = 4567;
 
   // if (argc > 2) {
   //   fprintf(stderr, "usage: %s [port] --- exit\n", argv[0]);

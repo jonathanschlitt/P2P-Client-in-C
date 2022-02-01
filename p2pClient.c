@@ -22,6 +22,8 @@
 int connectionCount = 0;
 int sockfds[50];
 
+int establishedConnections = 0;
+
 // socket initialisation
 int createFeed(int _port) {
   int sockfd;
@@ -256,6 +258,7 @@ void* runServer() {
 }
 
 // +++++++++++++++++++  Logic Client +++++++++++++++++++
+
 int setupConnectionClient(char* _serverAddress, int _port) {
   int sockfd;
   struct sockaddr_in servaddr;
@@ -287,6 +290,43 @@ int setupConnectionClient(char* _serverAddress, int _port) {
   return sockfd;
 }
 
+int firstTouchClient(char* _serverAddress, int _port) {
+  int sockfd = setupConnectionClient(_serverAddress, _port);
+  if (sockfd < 0) exit(-1 * sockfd);
+  char buffer[MESG_SIZE];
+  bzero(buffer, MESG_SIZE);
+  strcpy(buffer, "HelloServer");
+  write(sockfd, buffer, MESG_SIZE);
+  bzero(buffer, MESG_SIZE);
+  read(sockfd, buffer, MESG_SIZE);
+  _port = ((int*)buffer)[0];
+  close(sockfd);
+  return _port;
+}
+
+void clientFunction(int sockfd) {
+  char buffer[MESG_SIZE];
+  int n;
+  while (1) {
+    // // clear buffer
+    // bzero(buffer, sizeof(buffer));
+    // printf("Enter string: ");
+    // n = 0;
+    // while ((buffer[n++] = getchar()) != '\n')
+    //   ;
+    // write(sockfd, buffer, sizeof(buffer));
+    // bzero(buffer, sizeof(buffer));
+
+    // read(sockfd, buffer, sizeof(buffer));
+    // printf("From Server : %s", buffer);
+
+    // if ((strncmp(buffer, "QUIT", 4)) == 0) {
+    //   printf("Client exit.\n");
+    //   break;
+    // }
+  }
+}
+
 void permanentConnectionClient(char* _serverAddress, int _port) {
   int sockfd = setupConnectionClient(_serverAddress, _port);
   int retries = 5;
@@ -301,7 +341,8 @@ void permanentConnectionClient(char* _serverAddress, int _port) {
             _port);
     exit(-1 * sockfd);
   }
-  // clientFunction(sockfd);
+
+  // clientFunction(sockfd, );
   close(sockfd);
 }
 
@@ -395,6 +436,7 @@ void readAndSendMessage(int clientNumber) {
 
   // Sleep when sending message to client
   while (!setMessageForClient(target, buffer)) usleep(100);
+  printf("%s", Message.mesg);
 
   // write(sockfd, buffer, sizeof(buffer));
   // bzero(buffer, sizeof(buffer));
@@ -404,17 +446,39 @@ void readAndSendMessage(int clientNumber) {
 }
 
 void establishConnection() {
-  char buffer[MESG_SIZE];
-  int n;
+  while (1) {
+    int port;
+    char buffer1[MESG_SIZE];
+    int n1;
 
-  // clear buffer
-  bzero(buffer, sizeof(buffer));
-  printf("Enter IP Address: ");
-  n = 0;
-  while ((buffer[n++] = getchar()) != '\n')
-    ;
+    // clear buffer
+    bzero(buffer1, sizeof(buffer1));
+    printf("Enter IP Address: ");
+    n1 = 0;
+    while ((buffer1[n1++] = getchar()) != '\n')
+      ;
 
-  printf("IP Address: %s", buffer);
+    char buffer2[MESG_SIZE];
+    int n2;
+
+    // clear buffer
+    bzero(buffer2, sizeof(buffer2));
+    printf("Enter Port: ");
+    n2 = 0;
+    while ((buffer2[n2++] = getchar()) != '\n')
+      ;
+
+    printf("IP Address: %s", buffer1);
+    printf("Port: %s", buffer2);
+
+    port = firstTouchClient(buffer1, atoi(buffer2));
+
+    permanentConnectionClient(buffer1, port);
+
+    establishedConnections++;
+
+    break;
+  }
 }
 
 void stopConnection() {
@@ -446,7 +510,7 @@ void waitForInput() {
   while (1) {
     // clear buffer
     bzero(buffer, sizeof(buffer));
-    printf("Enter Character (1 - 5 or C, D, Q): ");
+    printf("Enter Character (1 - 5 or C, D, Q): \n\n");
     n = 0;
     while ((buffer[n++] = getchar()) != '\n')
       ;
@@ -510,40 +574,7 @@ int main(int argc, char** argv) {
   signal(SIGPIPE, SIG_IGN);  // Stopping Server crash after ctrl + c
   setbuf(stdout, 0);         // ==> deleting standard out puffer
 
-  // int port = 4567;
-  // int stdPort = 4567;
-
-  // int sockfd = createFeed(stdPort);
-
-  // int connfd, len;
-  // struct sockaddr_in client;
-
-  // // fprintf(stderr, "sockfd: %d\n", sockfd);
-
-  // connfd = setupConnection(sockfd);
-
-  // if (connfd < 0) {
-  //   fprintf(stderr, "Error: Server accept failed --- exit\n");
-  //   exit(6);
-  // } else {
-  //   printf("Server accept client.\n");
-  // }
-
-  // port = firstTouch(connfd, port);
-
-  // int permanentSockfd = createFeed(port);
-
-  // int nextFreeIndex = 0;
-
-  // for (int i = 0; i < 50; i++) {
-  //   if (sockfds[i] == 0) {
-  //     nextFreeIndex = i;
-  //     break;
-  //   }
-  // }
-
-  // sockfds[nextFreeIndex] = setupConnection(permanentSockfd);
-
+  // starting thread for server
   pthread_t server;
   pthread_create(&server, NULL, &runServer, NULL);
 
@@ -564,98 +595,6 @@ int main(int argc, char** argv) {
   while (1) {
     waitForInput();
   }
-
-  // // reading message from destination and message from commandline
-  // char buffer[MAX_MSG_SIZE];
-  // int target;
-  // Message.clientID = -1;
-  // while (1) {
-  //   while (Message.clientID != -1) {
-  //     usleep(100);
-  //   }
-  //   // reading inputs
-  //   printf("Ziel: ");
-  //   scanf("%d", &target);
-  //   printf("Nachricht: ");
-  //   scanf("%s", buffer);
-
-  //   // Sleep when sending message to client
-  //   while (!setMessageForClient(target, buffer)) usleep(100);
-  // }
-
-  // char tmp = argv[1];
-
-  // if (argc > 2) {
-  //   fprintf(stderr, "usage: %s [port] --- exit\n", argv[0]);
-  //   return 1;
-  // }
-  // if (argc == 2) {
-  //   char* tmp = argv[1];
-  //   while (tmp[0] != 0) {
-  //     if (!isdigit((int)tmp[0])) {
-  //       fprintf(stderr, "Error: %s is no valid port --- exit\n", argv[1]);
-  //       return 2;
-  //     }
-  //     tmp++;
-  //   }
-  //   port = atoi(argv[1]);
-  // }
-
-  // 50 clients
-
-  // pthread_t thread;
-
-  // int sockfd = createFeed(stdPort);  // for first touch ==> creating socket
-  // fprintf(stderr, "Port: %d\n", port);
-
-  // while (1) {
-  //   while (connectionCount > 50) {
-  //     usleep(100);
-  //   }
-
-  //   for (int i = 0; i < 50; i++) {
-  //     printf("array[%d] = %d\n\n", i + 1, sockfds[i]);
-  //   }
-  //   printf("connectionCount: %d\n", connectionCount);
-
-  //   int connfd, len;
-  //   struct sockaddr_in client;
-
-  //   // fprintf(stderr, "sockfd: %d\n", sockfd);
-
-  //   connfd = setupConnection(sockfd);
-
-  //   if (connfd < 0) {
-  //     fprintf(stderr, "Error: Server accept failed --- exit\n");
-  //     exit(6);
-  //   } else {
-  //     printf("Server accept client.\n");
-  //   }
-
-  //   port = firstTouch(connfd, port);  // ==> now got to firstTouch
-
-  //   // fprintf(stderr, "PORT: %d\n", port);
-  //   // fprintf(stderr, "CONNFD: %d\n", connfd);
-
-  //   int permanentSockfd = createFeed(port);
-
-  //   int nextFreeIndex = 0;
-
-  //   for (int i = 0; i < 50; i++) {
-  //     if (sockfds[i] == 0) {
-  //       nextFreeIndex = i;
-  //       break;
-  //     }
-  //   }
-
-  //   sockfds[nextFreeIndex] = setupConnection(permanentSockfd);
-  //   int* arg = malloc(sizeof(*arg));
-  //   if (arg == NULL) {
-  //     exit(EXIT_FAILURE);
-  //   }
-  //   *arg = sockfds[nextFreeIndex];
-  //   pthread_create(&thread, NULL, serverFunction, arg);
-  // }
 
   // pthread_join(thread, NULL);
 

@@ -184,10 +184,7 @@ void readAndSendMessage(int clientNumber) {
   // printf("From Server : %s", buffer);
 }
 
-int main(int argc, char** argv) {
-  signal(SIGPIPE, SIG_IGN);  // Stopping Server crash after ctrl + c
-  setbuf(stdout, 0);         // ==> deleting standard out puffer
-
+void inputMethod() {
   char buffer[MESG_SIZE];
   int n;
 
@@ -239,44 +236,21 @@ int main(int argc, char** argv) {
       break;
     }
     if ((strncmp(buffer, "D", 1)) == 0) {
-      printf("Your input: C\n");
+      printf("Your input: D\n");
       break;
     }
     if ((strncmp(buffer, "Q", 1)) == 0) {
       printf("Your input: Q\n");
       break;
     }
-
-    // switch (buffer) {
-    //   case '1':
-    //     printf("Your input: 1\n");
-    //     break;
-    //   case '2':
-    //     printf("Your input: 2\n");
-    //     break;
-    //   case '3':
-    //     printf("Your input: 3\n");
-    //     break;
-    //   case '4':
-    //     printf("Your input: 4\n");
-    //     break;
-    //   case '5':
-    //     printf("Your input: 5\n");
-    //     break;
-    //   case 'c':
-    //     printf("Your input: C\n");
-    //     break;
-    //   case 'd':
-    //     printf("Your input: D\n");
-    //     break;
-    //   case 'q':
-    //     printf("Your input: Q\n");
-    //     break;
-
-    //   default:
-    //     break;
-    // }
   }
+}
+
+int main(int argc, char** argv) {
+  signal(SIGPIPE, SIG_IGN);  // Stopping Server crash after ctrl + c
+  setbuf(stdout, 0);         // ==> deleting standard out puffer
+
+  inputMethod();
 
   // char tmp = argv[1];
 
@@ -362,6 +336,5 @@ int main(int argc, char** argv) {
   // //   printf("closing socket: %i\n", sockfds[i]);
   // //   close(sockfds[i]);
   // // }
-
   return 0;
 }

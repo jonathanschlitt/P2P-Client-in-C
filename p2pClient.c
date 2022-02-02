@@ -185,6 +185,7 @@ void* serverFunction(void* arg) {
     // if msg contains "QUIT" then server exit and chat ended.
     if (strncmp("QUIT", buffer, 4) == 0) {
       clientLeft(sockfd);
+      break;
 
       // printf("Server Exit...\n");
       // break;
@@ -385,7 +386,7 @@ void* ThreadFunc(void* _data) {
       }
 
       // Printing returned message from server to console
-      printf("%d: got message: %sfrom server \n", myID + 1, response);
+      printf("%d: got message: %s from server \n", myID + 1, response);
 
       // Reset message id after usage
       mfc->clientID = -1;
@@ -393,8 +394,15 @@ void* ThreadFunc(void* _data) {
       // Unlocking Mutex of global message
       pthread_mutex_unlock(&messageMut);
 
-      if (strncmp(buffer, "quit", 4) == 0) break;
-      bzero(buffer, sizeof(buffer));
+      // if (strncmp(buffer, "quit", 4) == 0) break;
+      // bzero(buffer, sizeof(buffer));
+
+      if ((strncmp(response, "QUIT", 4)) == 0) {
+        // set connfd to default
+        threadInfo[myID].connfd = -1;
+        printf("Client exit.\n");
+        continue;
+      }
     } else {
       pthread_mutex_unlock(&messageMut);
       usleep(100);
@@ -541,12 +549,63 @@ void stopConnection() {
 
   // clear buffer
   bzero(buffer, sizeof(buffer));
-  printf("Client Number: ");
+  printf("Enter Client Number: ");
   n = 0;
   while ((buffer[n++] = getchar()) != '\n')
     ;
 
   printf("Stop connection: Client %s", buffer);
+
+  int clientNumber = atoi(buffer);
+
+  printf("ClientNumber for sending quit: %d\n", clientNumber);
+
+  // Locking the mutex to use the global threadData
+  pthread_mutex_lock(&threadDataMut);
+  // printf("ClientId: %d\n", clientNumber);
+
+  // Checking if there is an connection made with the client which has the given
+  // id If thre already is the default value -1, there is no connection ==>
+  // leaving method
+  if (threadInfo[clientNumber - 1].connfd == -1) {
+    printf("Verbindung %d existiert nicht. \n", clientNumber);
+    pthread_mutex_unlock(&threadDataMut);
+    return;
+  }
+  // unlocking Mutex after reading data
+  pthread_mutex_unlock(&threadDataMut);
+
+  // Setting Information about target and clientID
+  // char buffer[MAX_MSG_SIZE];
+
+  // Setting quit message
+  char quitMessage[] = "quit";
+  int target;
+  target = clientNumber - 1;
+
+  // Setting clientID of global message to -1
+  Message.clientID = -1;
+
+  // Waiting for clientID of global message to be set to -1
+  while (1) {
+    pthread_mutex_lock(&messageMut);
+    if (Message.clientID == -1) {
+      pthread_mutex_unlock(&messageMut);
+      break;
+    }
+    pthread_mutex_unlock(&messageMut);
+    usleep(100);
+  }
+
+  // Reading entered message to send over the client
+
+  // Set the global Message for client in combination with target
+  while (!setMessageForClient(target, quitMessage)) usleep(100);
+  pthread_mutex_lock(&messageMut);
+
+  // Unlocking MessageMutex that the global message can bes used by other client
+  // threads
+  pthread_mutex_unlock(&messageMut);
 }
 
 // TODO
@@ -595,7 +654,7 @@ void waitForInput() {
     int command = buffer[0] - '0';
     if (0 <= command && command <= MAX_CLIENTS) {
       printf("Your input: %d\n", command);
-      readAndSendMessage(0);
+      readAndSendMessage(command - 1);
     }
   }
 }

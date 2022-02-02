@@ -34,7 +34,6 @@ struct ThreadData {
   int ID;
   struct MessageForClient* mfc;
   int connfd;
-  int address;
 };
 
 struct MessageForClient Message;  // Globale Nachricht zum austausch für alle
@@ -43,6 +42,8 @@ pthread_mutex_t messageMut;
 pthread_mutex_t threadDataMut;
 
 struct ThreadData threadInfo[MAX_CLIENTS];
+
+void quitHandler(int clientNumber);
 
 // socket initialisation
 int createFeed(int _port) {
@@ -414,14 +415,16 @@ void* ThreadFunc(void* _data) {
 void readAndSendMessage(int clientNumber) {
   // Locking the mutex to use the global threadData
   pthread_mutex_lock(&threadDataMut);
-  printf("ClientId: %d\n", clientNumber);
+  // printf("ClientId: %d\n", clientNumber);
 
   // Checking if there is an connection made with the client which has the given
   // id If thre already is the default value -1, there is no connection ==>
   // leaving method
   if (threadInfo[clientNumber].connfd == -1) {
-    printf("Verbindung %d existiert nocht nicht bitte mit C erstellen\n",
-           clientNumber + 1);
+    printf(
+        "Connection %d was not established. Create connection using C "
+        "command.\n",
+        clientNumber + 1);
     pthread_mutex_unlock(&threadDataMut);
     return;
   }
@@ -484,7 +487,8 @@ void establishConnection() {
   // Check if there are clients left to connect with
   // then leaving method
   if (connectionId == -1) {
-    printf("Bereits %d Verbindungen Aufgebaut, keine übrig\n", MAX_CLIENTS);
+    printf("All %d connections already established, no connection left! \n",
+           MAX_CLIENTS);
     pthread_mutex_unlock(&threadDataMut);
     return;
   }
@@ -542,7 +546,6 @@ void establishConnection() {
   pthread_mutex_unlock(&threadDataMut);
 }
 
-// TODO
 void stopConnection() {
   char buffer[MESG_SIZE];
   int n;
@@ -558,6 +561,11 @@ void stopConnection() {
 
   int clientNumber = atoi(buffer);
 
+  quitHandler(clientNumber - 1);
+}
+
+// Helper Method to quit all clients
+void quitHandler(int clientNumber) {
   printf("ClientNumber for sending quit: %d\n", clientNumber);
 
   // Locking the mutex to use the global threadData
@@ -567,8 +575,8 @@ void stopConnection() {
   // Checking if there is an connection made with the client which has the given
   // id If thre already is the default value -1, there is no connection ==>
   // leaving method
-  if (threadInfo[clientNumber - 1].connfd == -1) {
-    printf("Verbindung %d existiert nicht. \n", clientNumber);
+  if (threadInfo[clientNumber].connfd == -1) {
+    printf("Connection %d was not established. \n", clientNumber);
     pthread_mutex_unlock(&threadDataMut);
     return;
   }
@@ -580,13 +588,12 @@ void stopConnection() {
 
   // Setting quit message
   char quitMessage[] = "quit";
-  int target;
-  target = clientNumber - 1;
 
   // Setting clientID of global message to -1
-  Message.clientID = -1;
+  //  Message.clientID = -1;
 
-  // Waiting for clientID of global message to be set to -1
+  // Set the global Message for client in combination with target
+  while (!setMessageForClient(clientNumber, quitMessage)) usleep(100);
   while (1) {
     pthread_mutex_lock(&messageMut);
     if (Message.clientID == -1) {
@@ -596,22 +603,21 @@ void stopConnection() {
     pthread_mutex_unlock(&messageMut);
     usleep(100);
   }
-
-  // Reading entered message to send over the client
-
-  // Set the global Message for client in combination with target
-  while (!setMessageForClient(target, quitMessage)) usleep(100);
-  pthread_mutex_lock(&messageMut);
-
-  // Unlocking MessageMutex that the global message can bes used by other client
-  // threads
-  pthread_mutex_unlock(&messageMut);
 }
 
-// TODO
 void quit() {
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    pthread_mutex_lock(&threadDataMut);
+    if (threadInfo[i].connfd == -1) {
+      pthread_mutex_unlock(&threadDataMut);
+      continue;
+    } else {
+      pthread_mutex_unlock(&threadDataMut);
+      quitHandler(threadInfo[i].ID);
+    }
+  }
+
   printf("Stopping server... \n");
-  // sleep(100);
   exit(0);
 }
 
@@ -624,6 +630,7 @@ void waitForInput() {
   while (1) {
     // clear buffer
     bzero(buffer, sizeof(buffer));
+    printf("\nNumber of existing Server Connections: %d\n", connectionCount);
     printf("Enter Character (1 - 5 or C, D, Q): \n\n");
     n = 0;
     while ((buffer[n++] = getchar()) != '\n')
@@ -696,12 +703,5 @@ int main(int argc, char** argv) {
     waitForInput();
   }
 
-  // pthread_join(thread, NULL);
-
-  // // Closing all sockets when server ist not used anymore
-  // // for (int i = connectionCount; i > 0; i--) {
-  // //   printf("closing socket: %i\n", sockfds[i]);
-  // //   close(sockfds[i]);
-  // // }
   return 0;
 }

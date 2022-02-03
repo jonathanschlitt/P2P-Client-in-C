@@ -303,8 +303,8 @@ int setupConnectionClient(char* _serverAddress, int _port) {
 
   // Connect to server
   if (connect(sockfd, (SA*)&servaddr, sizeof(servaddr)) != 0) {
-    fprintf(stderr, "Error: Cannot connect server on port %d --- exit\n",
-            _port);
+    // fprintf(stderr, "Error: Cannot connect server on port %d --- exit\n",
+    //         _port);
     return -4;
   } else {
     printf("connected to the server..\n");
@@ -315,15 +315,20 @@ int setupConnectionClient(char* _serverAddress, int _port) {
 
 int firstTouchClient(char* _serverAddress, int _port) {
   int sockfd = setupConnectionClient(_serverAddress, _port);
-  if (sockfd < 0) exit(-1 * sockfd);
-  char buffer[MESG_SIZE];
-  bzero(buffer, MESG_SIZE);
-  strcpy(buffer, "HelloServer");
-  write(sockfd, buffer, MESG_SIZE);
-  bzero(buffer, MESG_SIZE);
-  read(sockfd, buffer, MESG_SIZE);
-  _port = ((int*)buffer)[0];
-  close(sockfd);
+  if (sockfd < 0) {
+    // exit(-1 * sockfd);
+    _port = -1;
+  } else {
+    char buffer[MESG_SIZE];
+    bzero(buffer, MESG_SIZE);
+    strcpy(buffer, "HelloServer");
+    write(sockfd, buffer, MESG_SIZE);
+    bzero(buffer, MESG_SIZE);
+    read(sockfd, buffer, MESG_SIZE);
+    _port = ((int*)buffer)[0];
+    close(sockfd);
+  }
+
   return _port;
 }
 
@@ -529,21 +534,26 @@ void establishConnection() {
   int permanentPort = firstTouchClient(serverAddress, connectionPort);
   int retries = 5;
 
-  // Saving connfd and handling connection errors
-  while (threadInfo[connectionId].connfd < 0 && retries > 0) {
-    sleep(1);
-    // Writing connfd to threadInfo array
-    threadInfo[connectionId].connfd =
-        setupConnectionClient(serverAddress, permanentPort);
-    retries--;
-  }
-  if (retries == 0 && threadInfo[connectionId].connfd < 0) {
-    fprintf(stderr, "Error: Cannot reconnect server on port %s --- exit\n",
-            portString);
+  if (permanentPort == -1) {
+    printf(
+        "\nCannot connect to server! Try again or enter other IP and port.\n");
+  } else {
+    // Saving connfd and handling connection errors
+    while (threadInfo[connectionId].connfd < 0 && retries > 0) {
+      sleep(1);
+      // Writing connfd to threadInfo array
+      threadInfo[connectionId].connfd =
+          setupConnectionClient(serverAddress, permanentPort);
+      retries--;
+    }
+    if (retries == 0 && threadInfo[connectionId].connfd < 0) {
+      fprintf(stderr, "Error: Cannot reconnect server on port %s --- exit\n",
+              portString);
+      pthread_mutex_unlock(&threadDataMut);
+      exit(-1 * threadInfo[connectionId].connfd);
+    }
     pthread_mutex_unlock(&threadDataMut);
-    exit(-1 * threadInfo[connectionId].connfd);
   }
-  pthread_mutex_unlock(&threadDataMut);
 }
 
 void stopConnection() {
